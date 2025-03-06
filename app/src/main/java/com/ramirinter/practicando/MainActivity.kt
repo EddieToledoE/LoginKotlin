@@ -1,5 +1,7 @@
 package com.ramirinter.practicando
 
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -28,15 +30,59 @@ import com.ramirinter.practicando.ui.register.RegisterScreen
 import com.ramirinter.practicando.ui.tasks.EditTaskScreen
 import com.ramirinter.practicando.ui.tasks.TaskListScreen
 import com.ramirinter.practicando.ui.tasks.CreateTaskScreen
+import com.google.firebase.messaging.FirebaseMessaging
+import android.util.Log
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import com.google.firebase.FirebaseApp
+import android.Manifest
+import androidx.activity.compose.setContent
+
+import androidx.appcompat.app.AppCompatActivity
+
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent {
-            PracticandoTheme {
-                val navController = rememberNavController()
-                AppNavigation(navController)
+
+        // Inicializar Firebase
+        FirebaseApp.initializeApp(this)
+
+        // Verificar y solicitar permisos de notificación en Android 13+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
+        }
+
+        // Obtener token de FCM
+        FirebaseMessaging.getInstance().token
+            .addOnCompleteListener { task ->
+                if (!task.isSuccessful) {
+                    Log.w("FCM", "Error obteniendo el token", task.exception)
+                    return@addOnCompleteListener
+                }
+                val token = task.result
+                Log.d("FCM", "Token actual: $token")
+            }
+
+        setContent {
+            val navController = rememberNavController()
+            AppNavigation(navController)
+        }
+    }
+
+    // Solicitar permiso de notificación en Android 13+
+    private val requestPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted: Boolean ->
+        if (isGranted) {
+            Log.d("FCM", "Permiso concedido")
+        } else {
+            Log.w("FCM", "Permiso de notificación denegado")
         }
     }
 }
@@ -45,70 +91,41 @@ class MainActivity : ComponentActivity() {
 fun AppNavigation(navController: NavController) {
     NavHost(
         navController = navController as NavHostController,
-        startDestination = "login" // Pantalla inicial
+        startDestination = "login"
     ) {
-        composable("login") {
-            LoginScreen(navController) // Pantalla de login
-        }
-        composable("home") {
-            HomeScreen(navController) // Pantalla de inicio
-        }
-        composable("register") {
-            RegisterScreen(navController) // Pantalla de registro
-        }
-        composable("friends") {
-            FriendScreen(navController) // Pantalla de amigos
-        }
-        composable("tasks"){
-            TaskListScreen(navController) // Pantalla de tareas
-        }
-        composable("task/create") {
-           CreateTaskScreen(navController) // Pantalla de creación de tarea
-        }
+        composable("login") { LoginScreen(navController) }
+        composable("home") { HomeScreen(navController) }
+        composable("register") { RegisterScreen(navController) }
+        composable("friends") { FriendScreen(navController) }
+        composable("tasks") { TaskListScreen(navController) }
+        composable("task/create") { CreateTaskScreen(navController) }
         composable("task/edit/{taskId}") { backStackEntry ->
             val taskId = backStackEntry.arguments?.getString("taskId")
             val taskRepository = TaskRepository()
 
-            var taskToEdit by remember { mutableStateOf<Task?>(null) }
-            var errorMessage by remember { mutableStateOf("") }
-            var isLoading by remember { mutableStateOf(true) }
+            var taskToEdit: Task? = null
+            var errorMessage = ""
+            var isLoading = true
 
-            // Recuperar la tarea usando el repositorio
             LaunchedEffect(taskId) {
                 if (taskId != null) {
                     taskRepository.getTaskById(taskId) { task, error ->
-                        if (task != null) {
-                            taskToEdit = task
-                        } else {
-                            errorMessage = error ?: "Error desconocido"
-                        }
+                        taskToEdit = task
+                        errorMessage = error ?: ""
                         isLoading = false
                     }
-                } else {
-                    errorMessage = "ID de tarea inválido"
-                    isLoading = false
                 }
             }
 
-            // Mostrar diferentes estados de la UI
             when {
-                isLoading -> {
-                    CircularProgressIndicator(modifier = Modifier.fillMaxSize())
-                }
-                taskToEdit != null -> {
-                    EditTaskScreen(navController = navController, task = taskToEdit!!)
-                }
-                errorMessage.isNotEmpty() -> {
-                    Text(
-                        text = errorMessage,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
+                isLoading -> CircularProgressIndicator(modifier = Modifier.fillMaxSize())
+                taskToEdit != null -> EditTaskScreen(navController, taskToEdit!!)
+                errorMessage.isNotEmpty() -> Text(
+                    text = errorMessage,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.fillMaxSize()
+                )
             }
         }
-
-
-
     }
 }
